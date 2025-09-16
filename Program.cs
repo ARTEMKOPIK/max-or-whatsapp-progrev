@@ -118,14 +118,44 @@ namespace MaxTelegramBot
 			"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
 		};
 
-		private static string GenerateRandomUserAgent()
-		{
-			var random = new Random();
-			var template = _userAgentTemplates[random.Next(_userAgentTemplates.Length)];
-			var chromeVersion = random.Next(118, 124);
-			var patchVersion = random.Next(0, 10);
-			return template.Replace("Chrome/120.0.0.0", $"Chrome/{chromeVersion}.0.{patchVersion}.0");
-		}
+                private static string GenerateRandomUserAgent()
+                {
+                        var random = new Random();
+                        var template = _userAgentTemplates[random.Next(_userAgentTemplates.Length)];
+                        var chromeVersion = random.Next(118, 124);
+                        var patchVersion = random.Next(0, 10);
+                        return template.Replace("Chrome/120.0.0.0", $"Chrome/{chromeVersion}.0.{patchVersion}.0");
+                }
+
+        private static readonly string[] _whatsAppCodeSelectors =
+        {
+            "div[data-testid='ocf-code']",
+            "div[data-testid='ocf-callout']",
+            "div[data-testid='ocf-enter-code']",
+            "div[data-testid='ocf-step']",
+            "div[data-testid='code']",
+            "div[data-testid*='code']",
+            "section[data-testid*='code']",
+            "span[data-testid*='code']",
+            "div[aria-label*='код']",
+            "span[aria-label*='код']",
+            "div[aria-label*='code']",
+            "span[aria-label*='code']",
+            "div[class*='code']",
+            "span[class*='code']",
+            "div[data-animate-modal-body='true']",
+            "div[data-animate-modal-body='true'] span",
+            "div[role='dialog']",
+            "div[role='dialog'] span",
+            "code",
+            "pre",
+            "span[dir='ltr']",
+            "span[dir='auto']"
+        };
+
+        private static readonly Regex HyphenCodeRegex = new(@"(?<!\w)([A-Z0-9]{4}-[A-Z0-9]{4,8})(?!\w)", RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+        private static readonly Regex MultiDigitCodeRegex = new(@"(?<!\d)(?:\d[\s\u00A0\-]*){6,8}(?!\d)", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+        private static readonly Regex NonDigitRegex = new(@"[^\d]", RegexOptions.Compiled);
 
         private static string? TryGetChromePath()
         {
@@ -1134,6 +1164,118 @@ namespace MaxTelegramBot
         }
 
 
+        private static string RemoveDirectionalMarks(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return text;
+            }
+
+            var builder = new StringBuilder(text.Length);
+            foreach (var ch in text)
+            {
+                var skip = ch == '\u200E' || ch == '\u200F' || ch == '\u202A' || ch == '\u202B' || ch == '\u202C' || ch == '\u202D' || ch == '\u202E';
+                if (!skip)
+                {
+                    builder.Append(ch);
+                }
+            }
+
+            return builder.ToString();
+        }
+
+        private static string? ExtractWhatsAppCode(string? rawText)
+        {
+            if (string.IsNullOrWhiteSpace(rawText))
+            {
+                return null;
+            }
+
+            var sanitized = RemoveDirectionalMarks(rawText).Replace('\u00A0', ' ');
+            sanitized = sanitized.Trim();
+            if (sanitized.Length == 0)
+            {
+                return null;
+            }
+
+            var hyphenMatch = HyphenCodeRegex.Match(sanitized);
+            if (hyphenMatch.Success)
+            {
+                return hyphenMatch.Groups[1].Value.ToUpperInvariant();
+            }
+
+            var matches = MultiDigitCodeRegex.Matches(sanitized);
+            foreach (Match match in matches)
+            {
+                var digits = NonDigitRegex.Replace(match.Value, string.Empty);
+                if (digits.Length >= 6 && digits.Length <= 8)
+                {
+                    return digits;
+                }
+            }
+
+            var digitsOnly = NonDigitRegex.Replace(sanitized, string.Empty);
+            if (digitsOnly.Length >= 6 && digitsOnly.Length <= 8)
+            {
+                return digitsOnly;
+            }
+
+            return null;
+        }
+
+        private static async Task<string?> TryReadVerificationCodeAsync(MaxWebAutomation cdp)
+        {
+            try
+            {
+                var scriptResult = await cdp.ExtractVerificationCodeAsync();
+                var fromScript = ExtractWhatsAppCode(scriptResult);
+                if (!string.IsNullOrEmpty(fromScript))
+                {
+                    Console.WriteLine("[WA] Код найден через глубокий поиск в DOM.");
+                    return fromScript;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[WA] Ошибка скрипта извлечения кода: {ex.Message}");
+            }
+
+            try
+            {
+                var bodyText = await cdp.GetBodyTextAsync();
+                var fromBody = ExtractWhatsAppCode(bodyText);
+                if (!string.IsNullOrEmpty(fromBody))
+                {
+                    Console.WriteLine("[WA] Код найден в тексте страницы.");
+                    return fromBody;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[WA] Ошибка чтения текста страницы: {ex.Message}");
+            }
+
+            foreach (var selector in _whatsAppCodeSelectors)
+            {
+                try
+                {
+                    var text = await cdp.GetTextBySelectorAsync(selector);
+                    var fromSelector = ExtractWhatsAppCode(text);
+                    if (!string.IsNullOrEmpty(fromSelector))
+                    {
+                        Console.WriteLine($"[WA] Код найден по селектору {selector}.");
+                        return fromSelector;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[WA] Ошибка чтения селектора {selector}: {ex.Message}");
+                }
+            }
+
+            return null;
+        }
+
         private static async Task<string> LaunchWhatsAppWebAsync(string phone, long telegramUserId, long chatId)
         {
             await _browserSemaphore.WaitAsync();
@@ -1204,15 +1346,16 @@ namespace MaxTelegramBot
                                 var sw = Stopwatch.StartNew();
                                 while (sw.ElapsedMilliseconds < 60000 && string.IsNullOrEmpty(code))
                                 {
-                                        var bodyText = await cdp.GetBodyTextAsync() ?? string.Empty;
-                                        var match = Regex.Match(bodyText, @"\b(\d{6,8}|[A-Z0-9]{4}-[A-Z0-9]{4,8})\b", RegexOptions.IgnoreCase);
-                                        if (match.Success)
+                                        var candidate = await TryReadVerificationCodeAsync(cdp);
+                                        if (!string.IsNullOrEmpty(candidate))
                                         {
-                                                code = match.Value;
+                                                code = candidate;
                                                 break;
                                         }
+
                                         await Task.Delay(1000);
                                 }
+
                                 if (string.IsNullOrEmpty(code))
                                 {
                                         Console.WriteLine("[WA] Код не найден на странице");

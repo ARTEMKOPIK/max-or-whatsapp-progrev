@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Globalization;
 using System.Net.Http;
 using System.Net.WebSockets;
 using System.Text;
@@ -390,10 +391,179 @@ namespace MaxTelegramBot
                         return resp?["result"]?["value"]?.Value<string>();
                 }
 
-		public async Task<bool> FillOtpInputsAsync(string digits)
-		{
-			var expr = "(function(code){"+
-				"var selectors=['div.code input','input.digit','input[type=number].digit','input[type=number]'];"+
+                public async Task<string?> ExtractVerificationCodeAsync(int minDigits = 6, int maxDigits = 8)
+                {
+                        if (minDigits < 1) minDigits = 1;
+                        if (maxDigits < minDigits) maxDigits = minDigits;
+
+                        var scriptTemplate = @"
+(function(){
+    var minDigits = __MIN__;
+    var maxDigits = __MAX__;
+    function uniquePush(arr, value) {
+        if (!value) return;
+        if (arr.indexOf(value) === -1) {
+            arr.push(value);
+        }
+    }
+    function collectTexts() {
+        var results = [];
+        if (!document || !document.body) return results;
+        var selectors = [
+            'div[data-testid*=""code""]',
+            'span[data-testid*=""code""]',
+            'div[aria-label*=""код""]',
+            'span[aria-label*=""код""]',
+            'div[aria-label*=""code""]',
+            'span[aria-label*=""code""]',
+            'div[class*=""code""]',
+            'span[class*=""code""]',
+            'div[data-animate-modal-body=""true""]',
+            'div[data-animate-modal-body=""true""] span',
+            'div[role=""dialog""]',
+            'div[role=""dialog""] span',
+            'code',
+            'pre',
+            'strong',
+            'b',
+            'h1',
+            'h2',
+            'h3',
+            'h4',
+            'h5',
+            'h6',
+            'p',
+            'span[dir=""ltr""]',
+            'span[dir=""auto""]'
+        ];
+        for (var i = 0; i < selectors.length; i++) {
+            try {
+                var list = document.querySelectorAll(selectors[i]);
+                for (var j = 0; j < list.length; j++) {
+                    var text = list[j].innerText || list[j].textContent || '';
+                    if (text) uniquePush(results, text);
+                }
+            } catch (e) {}
+        }
+        try {
+            var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+            var node;
+            while ((node = walker.nextNode())) {
+                var value = node.nodeValue;
+                if (!value) continue;
+                var trimmed = value.replace(/\s+/g, ' ').trim();
+                if (trimmed) uniquePush(results, trimmed);
+            }
+        } catch (e) {}
+        var inputs = document.querySelectorAll('input');
+        var buffer = [];
+        for (var k = 0; k < inputs.length; k++) {
+            var input = inputs[k];
+            var val = (input.value || '').trim();
+            if (!val) {
+                if (buffer.length >= minDigits && buffer.length <= maxDigits) {
+                    uniquePush(results, buffer.join(''));
+                }
+                buffer = [];
+                continue;
+            }
+            if (val.length === 1 && /[0-9A-Za-z]/.test(val)) {
+                buffer.push(val);
+                continue;
+            }
+            if (buffer.length >= minDigits && buffer.length <= maxDigits) {
+                uniquePush(results, buffer.join(''));
+            }
+            buffer = [];
+            if (val.length >= minDigits && val.length <= maxDigits) {
+                uniquePush(results, val);
+            }
+        }
+        if (buffer.length >= minDigits && buffer.length <= maxDigits) {
+            uniquePush(results, buffer.join(''));
+        }
+        var attrNodes = document.querySelectorAll('[aria-label],[data-testid],[title],[data-code],[data-value],[placeholder]');
+        var attrNames = ['aria-label','data-testid','title','data-code','data-value','placeholder'];
+        for (var t = 0; t < attrNodes.length; t++) {
+            var el = attrNodes[t];
+            for (var n = 0; n < attrNames.length; n++) {
+                if (el.hasAttribute(attrNames[n])) {
+                    var attrVal = el.getAttribute(attrNames[n]);
+                    if (attrVal) uniquePush(results, attrVal);
+                }
+            }
+        }
+        if (document.body) {
+            var bodyText = document.body.innerText || '';
+            uniquePush(results, bodyText);
+        }
+        return results;
+    }
+    function sanitize(text) {
+        return text.replace(/[\u200E\u200F\u202A-\u202E]/g, '');
+    }
+    function tryExtract(text) {
+        if (!text) return null;
+        text = sanitize(text);
+        var alnum = text.match(/[A-Z0-9]{4}-[A-Z0-9]{4,8}/ig);
+        if (alnum && alnum.length) {
+            return alnum[0].toUpperCase();
+        }
+        var pattern = '(\\d[\\s\\u00A0\\-]*){' + minDigits + ',' + maxDigits + '}';
+        var regex = new RegExp(pattern, 'g');
+        var match;
+        while ((match = regex.exec(text)) !== null) {
+            var digits = match[0].replace(/\D/g, '');
+            if (digits.length < minDigits || digits.length > maxDigits) continue;
+            var beforeIndex = match.index - 1;
+            if (beforeIndex >= 0) {
+                var beforeChar = text.charAt(beforeIndex);
+                if (/[0-9A-Za-z]/.test(beforeChar)) continue;
+            }
+            var afterIndex = match.index + match[0].length;
+            if (afterIndex < text.length) {
+                var afterChar = text.charAt(afterIndex);
+                if (/[0-9A-Za-z]/.test(afterChar)) continue;
+            }
+            return digits;
+        }
+        var digitsOnly = text.replace(/\D/g, '');
+        if (digitsOnly.length >= minDigits && digitsOnly.length <= maxDigits) {
+            return digitsOnly;
+        }
+        return null;
+    }
+    var candidates = collectTexts();
+    for (var i = 0; i < candidates.length; i++) {
+        var result = tryExtract(candidates[i]);
+        if (result) return result;
+    }
+    return '';
+})();
+";
+
+                        var script = scriptTemplate
+                                .Replace("__MIN__", minDigits.ToString(CultureInfo.InvariantCulture))
+                                .Replace("__MAX__", maxDigits.ToString(CultureInfo.InvariantCulture));
+
+                        var resp = await SendAsync("Runtime.evaluate", new JObject
+                        {
+                                ["expression"] = script,
+                                ["awaitPromise"] = true,
+                                ["returnByValue"] = true
+                        });
+
+                        var value = resp?["result"]?["value"]?.Value<string>();
+                        if (string.IsNullOrWhiteSpace(value))
+                                return null;
+
+                        return value.Trim();
+                }
+
+                public async Task<bool> FillOtpInputsAsync(string digits)
+                {
+                        var expr = "(function(code){"+
+                                "var selectors=['div.code input','input.digit','input[type=number].digit','input[type=number]'];"+
 				"var inputs=null;"+
 				"for(var i=0;i<selectors.length;i++){var list=document.querySelectorAll(selectors[i]); if(list&&list.length){inputs=list; if(list.length>=code.length) break;}}"+
 				"if(!inputs||inputs.length===0) return false;"+

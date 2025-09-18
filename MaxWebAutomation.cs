@@ -503,7 +503,7 @@ namespace MaxTelegramBot
     }
     function sanitize(text) {
         if (!text) return '';
-        text = text.replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069\u206A-\u206F\u200B\u200C\u200D\u2060\uFEFF]/g, '');
+        text = text.replace(/[\u200E\u200F\u202A\u202B\u202C\u202D\u202E\u2066\u2067\u2068\u2069\u206A\u206B\u206C\u206D\u206E\u206F\u200B\u200C\u200D\u2060\uFEFF]/g, '');
         return text.replace(/[\u00A0\u202F\u205F\u2007\u2008\u2009\u200A\u3000]/g, ' ');
     }
     function tryExtract(text) {

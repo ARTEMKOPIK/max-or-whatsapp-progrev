@@ -5,6 +5,7 @@ using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.ReplyMarkups;
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -154,8 +155,12 @@ namespace MaxTelegramBot
         };
 
         private static readonly Regex HyphenCodeRegex = new(@"(?<!\w)([A-Z0-9]{4}-[A-Z0-9]{4,8})(?!\w)", RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
-        private static readonly Regex MultiDigitCodeRegex = new(@"(?<!\d)(?:\d[\s\u00A0\-]*){6,8}(?!\d)", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+        private static readonly Regex MultiDigitCodeRegex = new(@"(?<!\d)(?:\d[\s\u00A0\u202F\u205F\u2007\u2009\u200A\u2060\u2066-\u2069\u206A-\u206F\-]*){6,8}(?!\d)", RegexOptions.Compiled | RegexOptions.CultureInvariant);
         private static readonly Regex NonDigitRegex = new(@"[^\d]", RegexOptions.Compiled);
+        private const string DirectionalMarksRaw = "\u200E\u200F\u202A\u202B\u202C\u202D\u202E\u2066\u2067\u2068\u2069\u206A\u206B\u206C\u206D\u206E\u206F\u200B\u200C\u200D\u2060\uFEFF";
+        private static readonly HashSet<char> DirectionalMarks = new(DirectionalMarksRaw);
+        private const string AdditionalWhitespaceRaw = "\u00A0\u202F\u205F\u2007\u2008\u2009\u200A\u3000";
+        private static readonly char[] AdditionalWhitespaceCharacters = AdditionalWhitespaceRaw.ToCharArray();
 
         private static string? TryGetChromePath()
         {
@@ -1174,11 +1179,12 @@ namespace MaxTelegramBot
             var builder = new StringBuilder(text.Length);
             foreach (var ch in text)
             {
-                var skip = ch == '\u200E' || ch == '\u200F' || ch == '\u202A' || ch == '\u202B' || ch == '\u202C' || ch == '\u202D' || ch == '\u202E';
-                if (!skip)
+                if (DirectionalMarks.Contains(ch))
                 {
-                    builder.Append(ch);
+                    continue;
                 }
+
+                builder.Append(ch);
             }
 
             return builder.ToString();
@@ -1191,7 +1197,11 @@ namespace MaxTelegramBot
                 return null;
             }
 
-            var sanitized = RemoveDirectionalMarks(rawText).Replace('\u00A0', ' ');
+            var sanitized = RemoveDirectionalMarks(rawText);
+            foreach (var specialSpace in AdditionalWhitespaceCharacters)
+            {
+                sanitized = sanitized.Replace(specialSpace, ' ');
+            }
             sanitized = sanitized.Trim();
             if (sanitized.Length == 0)
             {

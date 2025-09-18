@@ -412,6 +412,8 @@ namespace MaxTelegramBot
         var selectors = [
             'div[data-testid*=""code""]',
             'span[data-testid*=""code""]',
+            'div[data-testid*=""verification""]',
+            'span[data-testid*=""verification""]',
             'div[aria-label*=""код""]',
             'span[aria-label*=""код""]',
             'div[aria-label*=""code""]',
@@ -500,7 +502,9 @@ namespace MaxTelegramBot
         return results;
     }
     function sanitize(text) {
-        return text.replace(/[\u200E\u200F\u202A-\u202E]/g, '');
+        if (!text) return '';
+        text = text.replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069\u206A-\u206F\u200B\u200C\u200D\u2060\uFEFF]/g, '');
+        return text.replace(/[\u00A0\u202F\u205F\u2007\u2008\u2009\u200A\u3000]/g, ' ');
     }
     function tryExtract(text) {
         if (!text) return null;
@@ -509,7 +513,7 @@ namespace MaxTelegramBot
         if (alnum && alnum.length) {
             return alnum[0].toUpperCase();
         }
-        var pattern = '(\\d[\\s\\u00A0\\-]*){' + minDigits + ',' + maxDigits + '}';
+        var pattern = '(\\d[\\s\\u00A0\\u202F\\u205F\\u2007\\u2008\\u2009\\u200A\\u2060\\u2066-\\u2069\\u206A-\\u206F\\-]*){' + minDigits + ',' + maxDigits + '}';
         var regex = new RegExp(pattern, 'g');
         var match;
         while ((match = regex.exec(text)) !== null) {

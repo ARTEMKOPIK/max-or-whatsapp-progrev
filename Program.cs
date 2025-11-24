@@ -1407,14 +1407,124 @@ private static readonly string[] _whatsAppCodeSelectors =
                         {
                                 await cdp.TypeTextAsync(ch.ToString());
                                 await Task.Delay(50);
-                        }
+}
                         Console.WriteLine($"[WA] Ввёл номер {formattedPhone}");
 
-                        await Task.Delay(5000);
-                        const string nextBtnSelector = "button.x889kno.x1a8lsjc.x13jy36j.x64bnmy.x1n2onr6.x1rg5ohu.xk50ysn.x1f6kntn.xyesn5m.x1rl75mt.x19t5iym.xz7t8uv.x13xmedi.x178xt8z.x1lun4ml.xso031l.xpilrb4.x13fuv20.x18b5jzi.x1q0q8m5.x1t7ytsu.x1v8p93f.x1o3jo1z.x16stqrj.xv5lvn5.x1hl8ikr.xfagghw.x9dyr19.x9lcvmn.xbtce8p.xcjl5na.x14v0smp.x1k3x3db.xgm1il4.xuxw1ft.xv52azi";
-                        await cdp.ClickSelectorAsync(nextBtnSelector);
-                        Console.WriteLine("[WA] Нажал кнопку 'Далее'");
+                        // Ждем появления кнопки "Далее"
+                        await Task.Delay(3000);
+                        Console.WriteLine("[WA] 🔍 Ищу кнопку 'Далее'...");
+                        
+                        // Список селекторов кнопки "Далее" (от новых к старым)
+                        var nextBtnSelectors = new[]
+                        {
+                            "button.x889kno.x1a8lsjc.x13jy36j.x64bnmy.x1n2onr6.x1rg5ohu.xk50ysn.x1f6kntn.xyesn5m.x1g83kfv.x3qq2k7.x2x8art.x1qor8vf.x178xt8z.x1lun4ml.xso031l.xpilrb4.x13fuv20.x18b5jzi.x1q0q8m5.x1t7ytsu.x1v8p93f.x1o3jo1z.x16stqrj.xv5lvn5.x1hl8ikr.xfagghw.x9dyr19.x9lcvmn.x1pse0pq.x1f47i5p.xfn3atn.x1npidv.x9qntcr.xuxw1ft.xv52azi", // Новый селектор
+                            "button.x889kno.x1a8lsjc.x13jy36j.x64bnmy.x1n2onr6.x1rg5ohu.xk50ysn.x1f6kntn.xyesn5m.x1rl75mt.x19t5iym.xz7t8uv.x13xmedi.x178xt8z.x1lun4ml.xso031l.xpilrb4.x13fuv20.x18b5jzi.x1q0q8m5.x1t7ytsu.x1v8p93f.x1o3jo1z.x16stqrj.xv5lvn5.x1hl8ikr.xfagghw.x9dyr19.x9lcvmn.xbtce8p.xcjl5na.x14v0smp.x1k3x3db.xgm1il4.xuxw1ft.xv52azi" // Старый селектор
+                        };
 
+                        bool buttonClicked = false;
+                        foreach (var selector in nextBtnSelectors)
+                        {
+                            try
+                            {
+                                Console.WriteLine($"[WA] Пробую селектор: {selector.Substring(0, Math.Min(50, selector.Length))}...");
+                                
+                                // Проверяем, существует ли кнопка и кликабельна ли она
+                                var checkScript = $@"
+                                    (function() {{
+                                        var selector = '{selector.Replace("'", "\\'")}';
+                                        var btn = document.querySelector(selector);
+                                        if (btn) {{
+                                            return JSON.stringify({{ exists: true, enabled: !btn.disabled, visible: btn.offsetParent !== null, text: btn.innerText }});
+                                        }}
+                                        return JSON.stringify({{ exists: false }});
+                                    }})()
+                                ";
+                                
+                                var result = await cdp.EvaluateJavaScriptAsync(checkScript);
+                                Console.WriteLine($"[WA] Результат проверки кнопки: {result}");
+                                
+                                if (result?.Contains("\"exists\":true") == true)
+                                {
+                                    // Кнопка найдена, пробуем кликнуть
+                                    await Task.Delay(1000);
+                                    await cdp.ClickSelectorAsync(selector);
+                                    Console.WriteLine($"[WA] ✅ Успешно нажал кнопку 'Далее'");
+                                    buttonClicked = true;
+                                    break;
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"[WA] ⚠️ Ошибка с селектором: {ex.Message}");
+                                continue;
+                            }
+                        }
+
+                        if (!buttonClicked)
+                        {
+                            Console.WriteLine("[WA] ❌ ВНИМАНИЕ: Не удалось найти кнопку 'Далее' по селекторам!");
+                            Console.WriteLine("[WA] Пробую найти кнопку по тексту...");
+                            
+                            // Альтернатива - поиск по тексту кнопки
+                            try
+                            {
+                                var clickByTextScript = @"
+                                    (function() {
+                                        var buttons = document.querySelectorAll('button');
+                                        for (var i = 0; i < buttons.length; i++) {
+                                            var btn = buttons[i];
+                                            var text = (btn.innerText || btn.textContent || '').trim();
+                                            if (text === 'Далее' || text === 'Next' || text.includes('Далее')) {
+                                                btn.click();
+                                                return 'clicked:' + text;
+                                            }
+                                        }
+                                        return 'not_found';
+                                    })()
+                                ";
+                                var textResult = await cdp.EvaluateJavaScriptAsync(clickByTextScript);
+                                Console.WriteLine($"[WA] Результат поиска по тексту: {textResult}");
+                                
+                                if (textResult?.Contains("clicked:") == true)
+                                {
+                                    Console.WriteLine("[WA] ✅ Нажал кнопку через поиск по тексту");
+                                    buttonClicked = true;
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"[WA] ❌ Ошибка поиска по тексту: {ex.Message}");
+                            }
+                        }
+
+                        if (!buttonClicked)
+                        {
+                            Console.WriteLine("[WA] 🔄 Последняя попытка - эмуляция Enter...");
+                            try
+                            {
+                                await cdp.EvaluateJavaScriptAsync(@"
+                                    var event = new KeyboardEvent('keydown', {
+                                        key: 'Enter',
+                                        code: 'Enter',
+                                        keyCode: 13,
+                                        which: 13,
+                                        bubbles: true
+                                    });
+                                    document.dispatchEvent(event);
+                                ");
+                                Console.WriteLine("[WA] ⌨️ Отправил нажатие Enter");
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"[WA] ❌ Не удалось эмулировать Enter: {ex.Message}");
+                            }
+                        }
+                        
+                        await Task.Delay(2000);
+
+                        string code = string.Empty;
+                        try
+                        {
                         string code = string.Empty;
                         try
                         {
@@ -1675,6 +1785,18 @@ private static readonly string[] _whatsAppCodeSelectors =
                 return;
 
             var chatId = message.Chat.Id;
+            
+            // 🚫 ЗАЩИТА ОТ ГРУПП И КАНАЛОВ - бот работает только в личных чатах
+            if (message.Chat.Type != Telegram.Bot.Types.Enums.ChatType.Private)
+            {
+                Console.WriteLine($"⚠️ Игнорирую сообщение из {message.Chat.Type}: '{messageText}' (Chat ID: {chatId}, Title: {message.Chat.Title})");
+                
+                // Опционально: можно отправить предупреждение в группу (раскомментируйте если нужно)
+                // await botClient.SendTextMessageAsync(chatId, "⚠️ Бот работает только в личных чатах. Напишите мне в личку.", cancellationToken: cancellationToken);
+                
+                return; // Прерываем обработку
+            }
+            
             Console.WriteLine($"Получено сообщение: '{messageText}' от пользователя {message.From?.Id} ({message.From?.Username})");
 
             // Перехват ввода 6-значного кода авторизации

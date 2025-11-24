@@ -409,21 +409,46 @@ namespace MaxTelegramBot
     function collectTexts() {
         var results = [];
         if (!document || !document.body) return results;
+        // Расширенный список селекторов для WhatsApp Web
         var selectors = [
+            // Основные data-testid селекторы WhatsApp
+            'div[data-testid=""qrcode-code""]',
+            'div[data-testid=""linking-code""]',
+            'div[data-testid=""pairing-code""]',
+            'div[data-testid=""ocf-code""]',
+            'div[data-testid=""ocf-callout""]',
+            'div[data-testid=""ocf-enter-code""]',
+            'div[data-testid=""ocf-step""]',
             'div[data-testid*=""code""]',
             'span[data-testid*=""code""]',
             'div[data-testid*=""verification""]',
             'span[data-testid*=""verification""]',
+            'div[data-testid*=""pairing""]',
+            'span[data-testid*=""pairing""]',
+            // Aria-label селекторы
             'div[aria-label*=""код""]',
             'span[aria-label*=""код""]',
             'div[aria-label*=""code""]',
             'span[aria-label*=""code""]',
+            'div[aria-label*=""pairing""]',
+            'span[aria-label*=""pairing""]',
+            // Классы
             'div[class*=""code""]',
             'span[class*=""code""]',
+            'div[class*=""pairing""]',
+            'span[class*=""pairing""]',
+            'div[class*=""linking""]',
+            'span[class*=""linking""]',
+            // Диалоги и модальные окна
             'div[data-animate-modal-body=""true""]',
             'div[data-animate-modal-body=""true""] span',
+            'div[data-animate-modal-body=""true""] div',
             'div[role=""dialog""]',
             'div[role=""dialog""] span',
+            'div[role=""dialog""] div',
+            'div[role=""alert""]',
+            'div[role=""alert""] span',
+            // Общие элементы
             'code',
             'pre',
             'strong',
@@ -436,32 +461,80 @@ namespace MaxTelegramBot
             'h6',
             'p',
             'span[dir=""ltr""]',
-            'span[dir=""auto""]'
+            'span[dir=""auto""]',
+            // Дополнительные WhatsApp классы
+            'div._3lq_O',
+            'div._2UaNq',
+            'span._3lq_O',
+            'div[class*=""landing""]',
+            'div[class*=""intro""]'
         ];
+        
+        console.log('[CODE_EXTRACT] Начинаю поиск кода на странице...');
+        
         for (var i = 0; i < selectors.length; i++) {
             try {
                 var list = document.querySelectorAll(selectors[i]);
+                if (list.length > 0) {
+                    console.log('[CODE_EXTRACT] Найдено ' + list.length + ' элементов для селектора: ' + selectors[i]);
+                }
                 for (var j = 0; j < list.length; j++) {
                     var text = list[j].innerText || list[j].textContent || '';
-                    if (text) uniquePush(results, text);
+                    if (text && text.trim()) {
+                        console.log('[CODE_EXTRACT] Текст из селектора: ' + text.substring(0, 100));
+                        uniquePush(results, text);
+                    }
                 }
-            } catch (e) {}
+            } catch (e) {
+                console.log('[CODE_EXTRACT] Ошибка селектора ' + selectors[i] + ': ' + e.message);
+            }
         }
+        
+        // Поиск в Shadow DOM
         try {
+            console.log('[CODE_EXTRACT] Проверяю Shadow DOM...');
+            var allElements = document.querySelectorAll('*');
+            for (var i = 0; i < allElements.length; i++) {
+                if (allElements[i].shadowRoot) {
+                    console.log('[CODE_EXTRACT] Найден Shadow Root');
+                    var shadowText = allElements[i].shadowRoot.textContent || '';
+                    if (shadowText) {
+                        uniquePush(results, shadowText);
+                    }
+                }
+            }
+        } catch (e) {
+            console.log('[CODE_EXTRACT] Ошибка Shadow DOM: ' + e.message);
+        }
+        
+        // TreeWalker для полного обхода текста
+        try {
+            console.log('[CODE_EXTRACT] Запускаю TreeWalker...');
             var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
             var node;
+            var textCount = 0;
             while ((node = walker.nextNode())) {
                 var value = node.nodeValue;
                 if (!value) continue;
                 var trimmed = value.replace(/\s+/g, ' ').trim();
-                if (trimmed) uniquePush(results, trimmed);
+                if (trimmed && trimmed.length >= minDigits) {
+                    textCount++;
+                    uniquePush(results, trimmed);
+                }
             }
-        } catch (e) {}
+            console.log('[CODE_EXTRACT] TreeWalker обработал ' + textCount + ' текстовых узлов');
+        } catch (e) {
+            console.log('[CODE_EXTRACT] Ошибка TreeWalker: ' + e.message);
+        }
+        
+        // Поиск в input полях (для 8-значных кодов по символам)
         var inputs = document.querySelectorAll('input');
+        console.log('[CODE_EXTRACT] Найдено input полей: ' + inputs.length);
         var buffer = [];
         for (var k = 0; k < inputs.length; k++) {
             var input = inputs[k];
             var val = (input.value || '').trim();
+            console.log('[CODE_EXTRACT] Input[' + k + '] value: ' + val);
             if (!val) {
                 if (buffer.length >= minDigits && buffer.length <= maxDigits) {
                     uniquePush(results, buffer.join(''));
@@ -484,8 +557,11 @@ namespace MaxTelegramBot
         if (buffer.length >= minDigits && buffer.length <= maxDigits) {
             uniquePush(results, buffer.join(''));
         }
-        var attrNodes = document.querySelectorAll('[aria-label],[data-testid],[title],[data-code],[data-value],[placeholder]');
-        var attrNames = ['aria-label','data-testid','title','data-code','data-value','placeholder'];
+        
+        // Поиск в атрибутах
+        var attrNodes = document.querySelectorAll('[aria-label],[data-testid],[title],[data-code],[data-value],[placeholder],[data-link-code]');
+        var attrNames = ['aria-label','data-testid','title','data-code','data-value','placeholder','data-link-code'];
+        console.log('[CODE_EXTRACT] Проверяю атрибуты у ' + attrNodes.length + ' элементов');
         for (var t = 0; t < attrNodes.length; t++) {
             var el = attrNodes[t];
             for (var n = 0; n < attrNames.length; n++) {
@@ -495,10 +571,15 @@ namespace MaxTelegramBot
                 }
             }
         }
+        
+        // Полный текст body
         if (document.body) {
             var bodyText = document.body.innerText || '';
+            console.log('[CODE_EXTRACT] Body text length: ' + bodyText.length);
             uniquePush(results, bodyText);
         }
+        
+        console.log('[CODE_EXTRACT] Всего собрано текстов: ' + results.length);
         return results;
     }
     function sanitize(text) {
@@ -669,4 +750,4 @@ namespace MaxTelegramBot
 			await Task.CompletedTask;
 		}
 	}
-} 
+}

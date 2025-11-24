@@ -128,30 +128,61 @@ namespace MaxTelegramBot
                         return template.Replace("Chrome/120.0.0.0", $"Chrome/{chromeVersion}.0.{patchVersion}.0");
                 }
 
-        private static readonly string[] _whatsAppCodeSelectors =
+private static readonly string[] _whatsAppCodeSelectors =
         {
+            // Основные WhatsApp data-testid селекторы
+            "div[data-testid='qrcode-code']",
+            "div[data-testid='linking-code']",
+            "div[data-testid='pairing-code']",
             "div[data-testid='ocf-code']",
             "div[data-testid='ocf-callout']",
             "div[data-testid='ocf-enter-code']",
             "div[data-testid='ocf-step']",
             "div[data-testid='code']",
             "div[data-testid*='code']",
+            "div[data-testid*='pairing']",
+            "div[data-testid*='linking']",
             "section[data-testid*='code']",
             "span[data-testid*='code']",
+            "span[data-testid*='pairing']",
+            // Aria-label селекторы
             "div[aria-label*='код']",
             "span[aria-label*='код']",
             "div[aria-label*='code']",
             "span[aria-label*='code']",
+            "div[aria-label*='pairing']",
+            "span[aria-label*='pairing']",
+            "div[aria-label*='link']",
+            "span[aria-label*='link']",
+            // Классы
             "div[class*='code']",
             "span[class*='code']",
+            "div[class*='pairing']",
+            "span[class*='pairing']",
+            "div[class*='linking']",
+            "span[class*='linking']",
+            // Диалоги и модальные окна
             "div[data-animate-modal-body='true']",
             "div[data-animate-modal-body='true'] span",
+            "div[data-animate-modal-body='true'] div",
             "div[role='dialog']",
             "div[role='dialog'] span",
+            "div[role='dialog'] div",
+            "div[role='alert']",
+            "div[role='alert'] span",
+            // Общие элементы
             "code",
             "pre",
             "span[dir='ltr']",
-            "span[dir='auto']"
+            "span[dir='auto']",
+            "strong",
+            "b",
+            // Специфичные WhatsApp классы
+            "div._3lq_O",
+            "div._2UaNq",
+            "span._3lq_O",
+            "div[class*='landing']",
+            "div[class*='intro']"
         };
 
         private static readonly Regex HyphenCodeRegex = new(@"(?<!\w)([A-Z0-9]{4}-[A-Z0-9]{4,8})(?!\w)", RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
@@ -1235,54 +1266,88 @@ namespace MaxTelegramBot
 
         private static async Task<string?> TryReadVerificationCodeAsync(MaxWebAutomation cdp)
         {
+            Console.WriteLine("[WA] 🔎 Запускаю TryReadVerificationCodeAsync...");
+            
+            // Метод 1: Глубокий поиск через JavaScript
             try
             {
+                Console.WriteLine("[WA] 📋 Метод 1: Глубокий поиск через JavaScript скрипт...");
                 var scriptResult = await cdp.ExtractVerificationCodeAsync();
+                Console.WriteLine($"[WA] Результат скрипта: '{scriptResult ?? "null"}'");
                 var fromScript = ExtractWhatsAppCode(scriptResult);
                 if (!string.IsNullOrEmpty(fromScript))
                 {
-                    Console.WriteLine("[WA] Код найден через глубокий поиск в DOM.");
+                    Console.WriteLine($"[WA] ✅ Код найден через глубокий поиск в DOM: {fromScript}");
                     return fromScript;
+                }
+                else
+                {
+                    Console.WriteLine("[WA] ⚠️ Скрипт не вернул код");
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[WA] Ошибка скрипта извлечения кода: {ex.Message}");
+                Console.WriteLine($"[WA] ❌ Ошибка скрипта извлечения кода: {ex.Message}");
+                Console.WriteLine($"[WA] Stack trace: {ex.StackTrace}");
             }
 
+            // Метод 2: Чтение полного текста body
             try
             {
+                Console.WriteLine("[WA] 📄 Метод 2: Чтение текста body...");
                 var bodyText = await cdp.GetBodyTextAsync();
+                Console.WriteLine($"[WA] Длина текста body: {bodyText?.Length ?? 0} символов");
+                if (!string.IsNullOrEmpty(bodyText) && bodyText.Length > 0)
+                {
+                    Console.WriteLine($"[WA] Первые 200 символов body: {bodyText.Substring(0, Math.Min(200, bodyText.Length))}");
+                }
                 var fromBody = ExtractWhatsAppCode(bodyText);
                 if (!string.IsNullOrEmpty(fromBody))
                 {
-                    Console.WriteLine("[WA] Код найден в тексте страницы.");
+                    Console.WriteLine($"[WA] ✅ Код найден в тексте страницы: {fromBody}");
                     return fromBody;
+                }
+                else
+                {
+                    Console.WriteLine("[WA] ⚠️ Код не найден в тексте body");
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[WA] Ошибка чтения текста страницы: {ex.Message}");
+                Console.WriteLine($"[WA] ❌ Ошибка чтения текста страницы: {ex.Message}");
             }
 
+            // Метод 3: Проверка каждого селектора
+            Console.WriteLine($"[WA] 🎯 Метод 3: Проверка {_whatsAppCodeSelectors.Length} селекторов...");
+            int selectorIndex = 0;
             foreach (var selector in _whatsAppCodeSelectors)
             {
                 try
                 {
+                    selectorIndex++;
                     var text = await cdp.GetTextBySelectorAsync(selector);
+                    if (!string.IsNullOrEmpty(text))
+                    {
+                        Console.WriteLine($"[WA] Селектор [{selectorIndex}/{_whatsAppCodeSelectors.Length}] '{selector}' вернул: '{text.Substring(0, Math.Min(100, text.Length))}'");
+                    }
                     var fromSelector = ExtractWhatsAppCode(text);
                     if (!string.IsNullOrEmpty(fromSelector))
                     {
-                        Console.WriteLine($"[WA] Код найден по селектору {selector}.");
+                        Console.WriteLine($"[WA] ✅ Код найден по селектору {selector}: {fromSelector}");
                         return fromSelector;
                     }
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[WA] Ошибка чтения селектора {selector}: {ex.Message}");
+                    // Не логируем каждую ошибку селектора, только если нашли что-то
+                    if (selectorIndex % 10 == 0)
+                    {
+                        Console.WriteLine($"[WA] Проверено {selectorIndex} селекторов...");
+                    }
                 }
             }
 
+            Console.WriteLine("[WA] ❌ Код не найден ни одним методом");
             return null;
         }
 
@@ -1354,7 +1419,7 @@ namespace MaxTelegramBot
                         try
                         {
                                 var sw = Stopwatch.StartNew();
-                                while (sw.ElapsedMilliseconds < 60000 && string.IsNullOrEmpty(code))
+                                while (sw.ElapsedMilliseconds < 120000 && string.IsNullOrEmpty(code))
                                 {
                                         var candidate = await TryReadVerificationCodeAsync(cdp);
                                         if (!string.IsNullOrEmpty(candidate))

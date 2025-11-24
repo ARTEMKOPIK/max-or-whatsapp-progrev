@@ -1218,15 +1218,19 @@ namespace MaxTelegramBot
             foreach (Match match in matches)
             {
                 var digits = NonDigitRegex.Replace(match.Value, string.Empty);
-                if (digits.Length >= 6 && digits.Length <= 8)
+                // WhatsApp использует только 8-значные коды
+                if (digits.Length == 8)
                 {
+                    Console.WriteLine($"[WA] ✅ Найден 8-значный код в тексте: {digits}");
                     return digits;
                 }
             }
 
             var digitsOnly = NonDigitRegex.Replace(sanitized, string.Empty);
-            if (digitsOnly.Length >= 6 && digitsOnly.Length <= 8)
+            // WhatsApp использует только 8-значные коды
+            if (digitsOnly.Length == 8)
             {
+                Console.WriteLine($"[WA] ✅ Найден 8-значный код (только цифры): {digitsOnly}");
                 return digitsOnly;
             }
 
@@ -1237,7 +1241,8 @@ namespace MaxTelegramBot
         {
             try
             {
-                var scriptResult = await cdp.ExtractVerificationCodeAsync();
+                // WhatsApp использует только 8-значные коды
+                var scriptResult = await cdp.ExtractVerificationCodeAsync(8, 8);
                 var fromScript = ExtractWhatsAppCode(scriptResult);
                 if (!string.IsNullOrEmpty(fromScript))
                 {
